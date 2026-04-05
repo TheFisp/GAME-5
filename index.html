@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stack Replica - GIGANT & Confetti</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', sans-serif;
+            background-color: #4e342e;
+        }
+
+        #ui {
+            position: absolute;
+            top: 40px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-size: 100px;
+            font-weight: 900;
+            pointer-events: none;
+            text-shadow: 4px 4px 15px rgba(0,0,0,0.5);
+            z-index: 10;
+        }
+
+        #start-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 200;
+            cursor: pointer;
+        }
+
+        .btn-start {
+            padding: 30px 60px;
+            font-size: 32px;
+            background: #a1887f;
+            color: white;
+            border: none;
+            border-radius: 15px;
+            text-transform: uppercase;
+            font-weight: bold;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+
+        #game-over-msg {
+            display: none;
+            color: #ff8a65;
+            font-size: 60px;
+            margin-bottom: 30px;
+            font-weight: 900;
+        }
+
+        #win-screen {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(25px);
+            -webkit-backdrop-filter: blur(25px);
+            z-index: 300;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            text-align: center;
+        }
+
+        #win-text {
+            font-size: clamp(60px, 15vw, 120px);
+            font-weight: 900;
+            animation: rotateWin 2.5s ease-in-out infinite;
+        }
+
+        #hint-text {
+            margin-top: 30px;
+            font-size: 28px;
+            font-style: italic;
+            background: rgba(0,0,0,0.2);
+            padding: 10px 20px;
+            border-radius: 10px;
+        }
+
+        @keyframes rotateWin {
+            0% { transform: rotate(-12deg); }
+            50% { transform: rotate(12deg); }
+            100% { transform: rotate(-12deg); }
+        }
+
+        /* Canvas per i coriandoli */
+        #confetti-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 301;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui">0</div>
+    <canvas id="confetti-canvas"></canvas>
+
+    <div id="start-screen" onclick="startGame()">
+        <div id="game-over-msg">HAI PERSO!</div>
+        <button class="btn-start">Inizia Gioco</button>
+    </div>
+
+    <div id="win-screen">
+        <div id="win-text">HAI VINTO</div>
+        <div id="hint-text">Il tuo indizio: "Think about what the point of the game is."</div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        let scene, camera, renderer;
+        let stack = [];
+        const boxHeight = 1;
+        const originalBoxSize = 10; 
+        let score = 0;
+        let gameActive = false;
+        let won = false;
+        let moveDirection = 1;
+        const limit = 20;
+
+        // Logica Coriandoli
+        const confettiCanvas = document.getElementById('confetti-canvas');
+        const ctx = confettiCanvas.getContext('2d');
+        let particles = [];
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x6d4c41);
+
+            const aspect = window.innerWidth / window.innerHeight;
+            const d = 22;
+            camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, -100, 1000);
+            camera.position.set(30, 30, 30);
+            camera.lookAt(0, 0, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.4);
+            dirLight.position.set(15, 30, 10);
+            scene.add(dirLight);
+
+            resetGameLogic();
+            animate();
+            resizeConfetti();
+        }
+
+        function resetGameLogic() {
+            stack.forEach(layer => scene.remove(layer.mesh));
+            stack = [];
+            score = 0;
+            document.getElementById('ui').innerText = score;
+            camera.position.set(30, 30, 30);
+            addLayer(0, 0, originalBoxSize, originalBoxSize);
+            newBlock();
+        }
+
+        function startGame() {
+            if (!gameActive && !won) {
+                gameActive = true;
+                document.getElementById('start-screen').style.display = 'none';
+                document.getElementById('game-over-msg').style.display = 'none';
+            }
+        }
+
+        function addLayer(x, z, width, depth, direction) {
+            const y = boxHeight * stack.length;
+            const color = new THREE.Color(`hsl(${25 + stack.length * 4}, 45%, 50%)`);
+            const geometry = new THREE.BoxGeometry(width, boxHeight, depth);
+            const material = new THREE.MeshLambertMaterial({ color });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.set(x, y, z);
+            scene.add(mesh);
+            stack.push({ mesh, width, depth, direction });
+        }
+
+        function newBlock() {
+            const topLayer = stack[stack.length - 1];
+            const direction = stack.length % 2 === 0 ? 'z' : 'x';
+            const x = direction === 'x' ? -limit : topLayer.mesh.position.x;
+            const z = direction === 'z' ? -limit : topLayer.mesh.position.z;
+            moveDirection = 1;
+            addLayer(x, z, topLayer.width, topLayer.depth, direction);
+        }
+
+        function handleInteraction() {
+            if (!gameActive || won) return;
+
+            const topLayer = stack[stack.length - 1];
+            const previousLayer = stack[stack.length - 2];
+            const direction = topLayer.direction;
+
+            const delta = topLayer.mesh.position[direction] - previousLayer.mesh.position[direction];
+            const overlap = (direction === 'x' ? topLayer.width : topLayer.depth) - Math.abs(delta);
+
+            if (overlap > 0) {
+                const newWidth = direction === 'x' ? overlap : topLayer.width;
+                const newDepth = direction === 'z' ? overlap : topLayer.depth;
+
+                topLayer.width = newWidth;
+                topLayer.depth = newDepth;
+                topLayer.mesh.position[direction] -= delta / 2;
+                topLayer.mesh.geometry.dispose();
+                topLayer.mesh.geometry = new THREE.BoxGeometry(newWidth, boxHeight, newDepth);
+
+                score++;
+                document.getElementById('ui').innerText = score;
+
+                if (score >= 30) {
+                    winGame();
+                } else {
+                    camera.position.y += boxHeight;
+                    newBlock();
+                }
+            } else {
+                gameOver();
+            }
+        }
+
+        function winGame() {
+            won = true;
+            gameActive = false;
+            document.getElementById('win-screen').style.display = 'flex';
+            document.getElementById('ui').style.display = 'none';
+            createConfetti();
+        }
+
+        function gameOver() {
+            gameActive = false;
+            document.getElementById('game-over-msg').style.display = 'block';
+            document.getElementById('start-screen').style.display = 'flex';
+            resetGameLogic();
+        }
+
+        // Sistema Coriandoli
+        function createConfetti() {
+            for (let i = 0; i < 150; i++) {
+                particles.push({
+                    x: Math.random() * confettiCanvas.width,
+                    y: Math.random() * confettiCanvas.height - confettiCanvas.height,
+                    size: Math.random() * 10 + 5,
+                    color: `hsl(${Math.random() * 360}, 70%, 60%)`,
+                    speedX: Math.random() * 3 - 1.5,
+                    speedY: Math.random() * 5 + 2,
+                    rotation: Math.random() * 360,
+                    rotationSpeed: Math.random() * 10 - 5
+                });
+            }
+        }
+
+        function updateConfetti() {
+            ctx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+            particles.forEach((p, i) => {
+                p.y += p.speedY;
+                p.x += p.speedX;
+                p.rotation += p.rotationSpeed;
+                
+                ctx.save();
+                ctx.translate(p.x, p.y);
+                ctx.rotate(p.rotation * Math.PI / 180);
+                ctx.fillStyle = p.color;
+                ctx.fillRect(-p.size/2, -p.size/2, p.size, p.size);
+                ctx.restore();
+
+                if (p.y > confettiCanvas.height) particles[i].y = -20;
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (gameActive && !won) {
+                const activeLayer = stack[stack.length - 1];
+                const speed = 0.22 + (score * 0.005);
+                activeLayer.mesh.position[activeLayer.direction] += speed * moveDirection;
+                if (Math.abs(activeLayer.mesh.position[activeLayer.direction]) > limit) moveDirection *= -1;
+            }
+            if (won) updateConfetti();
+            renderer.render(scene, camera);
+        }
+
+        function resizeConfetti() {
+            confettiCanvas.width = window.innerWidth;
+            confettiCanvas.height = window.innerHeight;
+        }
+
+        window.addEventListener('mousedown', handleInteraction);
+        window.addEventListener('keydown', (e) => { if(e.code === 'Space') handleInteraction(); });
+        window.addEventListener('resize', () => {
+            resizeConfetti();
+            const aspect = window.innerWidth / window.innerHeight;
+            const d = 22;
+            camera.left = -d * aspect; camera.right = d * aspect;
+            camera.top = d; camera.bottom = -d;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        init();
+    </script>
+</body>
+</html>
